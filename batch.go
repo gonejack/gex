@@ -4,59 +4,73 @@ import (
 	"context"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
-type Batch struct {
-	mapp  map[string]*Task
-	tasks []*Task
+type batch struct {
+	mapp map[string]*Request
+	reqs []*Request
+	sema *semaphore.Weighted
+	mux  sync.Mutex
 
-	onStart func(t *Task)
-	onStop  func(t *Task)
-
-	mux sync.Mutex
+	onStart func(r *Request)
+	onStop  func(r *Request, err error)
 }
 
-func (b *Batch) Add(tasks ...*Task) {
+func (b *batch) Add(requests ...*Request) {
 	if b.mapp == nil {
-		b.mapp = make(map[string]*Task)
+		b.mapp = make(map[string]*Request)
 	}
-	for _, t := range tasks {
-		if b.mapp[t.URL()] == nil {
-			b.mapp[t.URL()] = t
-			b.tasks = append(b.tasks, t)
+	for _, r := range requests {
+		if b.mapp[r.Url] == nil {
+			b.mapp[r.Url] = r
+			b.reqs = append(b.reqs, r)
 		}
 	}
 }
-func (b *Batch) OnStart(fn func(t *Task)) {
+func (b *batch) Reset() {
+	b.mapp = nil
+	b.reqs = nil
+}
+func (b *batch) OnStart(fn func(r *Request)) {
 	b.onStart = fn
 }
-func (b *Batch) OnStop(fn func(t *Task)) {
+func (b *batch) OnStop(fn func(r *Request, err error)) {
 	b.onStop = fn
 }
-func (b *Batch) Run() {
-	b.RunAll(context.TODO(), 3)
-}
-func (b *Batch) RunAll(ctx context.Context, concurrent int) {
-	var sema = semaphore.NewWeighted(int64(concurrent))
-	var wait sync.WaitGroup
-	for i := range b.tasks {
-		t := b.tasks[i]
-		sema.Acquire(ctx, 1)
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			defer sema.Release(1)
-
-			b.syncRun(t, b.onStart)
-			_ = t.Do(ctx)
-			b.syncRun(t, b.onStop)
-		}()
+func (b *batch) Run(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.TODO()
 	}
-	wait.Wait()
+
+	var grp errgroup.Group
+	for i := range b.reqs {
+		r := b.reqs[i]
+		b.sema.Acquire(ctx, 1)
+
+		grp.Go(func() error {
+			defer b.sema.Release(1)
+
+			b.syncRun(func() { b.onStart(r) })
+			err := r.Do(ctx)
+			b.syncRun(func() { b.onStop(r, err) })
+
+			return nil
+		})
+	}
+	grp.Wait()
 }
-func (b *Batch) syncRun(t *Task, fn func(t *Task)) {
+func (b *batch) syncRun(f func()) {
 	b.mux.Lock()
 	defer b.mux.Unlock()
-	t.hook(fn)
+	f()
+}
+
+func NewBatch(concurrent int) *batch {
+	return &batch{
+		sema:    semaphore.NewWeighted(int64(concurrent)),
+		onStart: func(r *Request) {},
+		onStop:  func(r *Request, err error) {},
+	}
 }
