@@ -52,16 +52,16 @@ func (b *batch) Run(ctx context.Context) {
 		grp.Go(func() error {
 			defer b.sema.Release(1)
 
-			b.syncRun(func() { b.onStart(r) })
+			b.sync(func() { b.onStart(r) })
 			err := r.Do(ctx)
-			b.syncRun(func() { b.onStop(r, err) })
+			b.sync(func() { b.onStop(r, err) })
 
 			return nil
 		})
 	}
 	grp.Wait()
 }
-func (b *batch) syncRun(f func()) {
+func (b *batch) sync(f func()) {
 	b.mux.Lock()
 	defer b.mux.Unlock()
 	f()

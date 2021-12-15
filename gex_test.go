@@ -25,5 +25,5 @@ func TestMany(t *testing.T) {
 	b := gex.NewBatch(3)
 	b.OnStop(func(r *gex.Request, err error) { fmt.Println(err) })
 	b.Add(r1, r2)
-	b.Run()
+	b.Run(nil)
 }
