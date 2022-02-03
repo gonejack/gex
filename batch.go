@@ -9,11 +9,10 @@ import (
 )
 
 type batch struct {
-	mapp map[string]*Request
-	reqs []*Request
-	sema *semaphore.Weighted
-	mux  sync.Mutex
-
+	mapp    map[string]*Request
+	reqs    []*Request
+	sema    *semaphore.Weighted
+	mux     sync.Mutex
 	onStart func(r *Request)
 	onStop  func(r *Request, err error)
 }
@@ -43,19 +42,15 @@ func (b *batch) Run(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-
 	var grp errgroup.Group
 	for i := range b.reqs {
 		r := b.reqs[i]
 		b.sema.Acquire(ctx, 1)
-
 		grp.Go(func() error {
 			defer b.sema.Release(1)
-
 			b.sync(func() { b.onStart(r) })
 			err := r.Do(ctx)
 			b.sync(func() { b.onStop(r, err) })
-
 			return nil
 		})
 	}

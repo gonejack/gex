@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"time"
 )
 
@@ -44,13 +43,15 @@ func (r *Request) DoWithClient(ctx context.Context, client *http.Client) (err er
 	}
 	r.Response = resp
 
-	defer func() { resp.End = time.Now() }()
+	defer func() {
+		resp.End = time.Now()
+	}()
 
-	fd, stat, err := r.openPartial()
+	file, stat, err := r.openPartial()
 	if err != nil {
 		return
 	}
-	defer fd.Close()
+	defer file.Close()
 
 	req, err := r.rangeRequest(stat)
 	if err != nil {
@@ -73,19 +74,20 @@ func (r *Request) DoWithClient(ctx context.Context, client *http.Client) (err er
 
 	switch rsp.StatusCode {
 	case http.StatusPartialContent:
-		_, _ = fd.Seek(0, io.SeekEnd)
+		_, _ = file.Seek(0, io.SeekEnd)
 	case http.StatusOK, http.StatusRequestedRangeNotSatisfiable:
-		_ = fd.Truncate(0)
+		_ = file.Truncate(0)
 	default:
 		err = fmt.Errorf("invalid status code %d(%s)", rsp.StatusCode, rsp.Status)
 		return
 	}
 	resp.Header = rsp.Header
-	resp.Size, err = io.Copy(fd, rsp.Body)
+	resp.Size, err = io.Copy(file, rsp.Body)
 	if err != nil {
 		return
 	}
-	err = os.Rename(fd.Name(), r.Output)
+	file.Close() // for Windows
+	err = os.Rename(file.Name(), r.Output)
 	if err != nil {
 		return
 	}
@@ -93,7 +95,6 @@ func (r *Request) DoWithClient(ctx context.Context, client *http.Client) (err er
 
 	return
 }
-
 func (r *Request) skip() bool {
 	_, err := os.Stat(r.Output + infoSuffix)
 	if err == nil {
@@ -122,11 +123,12 @@ func (r *Request) rangeRequest(stat os.FileInfo) (req *http.Request, err error) 
 	if err != nil {
 		return
 	}
+
 	req.Header.Set("range", fmt.Sprintf("bytes=%d-", stat.Size()))
-	for hdr := range req.Header {
-		req.Header[hdr] = req.Header[hdr]
+	for hdr := range r.Header {
+		req.Header[hdr] = r.Header[hdr]
 	}
-	r.Header = req.Header
+
 	return
 }
 
@@ -138,7 +140,7 @@ func NewRequest(dir string, requrl string) (r *Request) {
 	}
 	u, err := url.Parse(requrl)
 	if err == nil {
-		r.Output = filepath.Join(dir, fmt.Sprintf("%x", md5.Sum([]byte(requrl)))+path.Ext(u.Path))
+		r.Output = path.Join(dir, fmt.Sprintf("%x", md5.Sum([]byte(requrl)))+path.Ext(u.Path))
 	}
 	return
 }
