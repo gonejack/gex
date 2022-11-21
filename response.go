@@ -66,6 +66,8 @@ func (r *Response) ModTime() (t time.Time) {
 
 func DefaultHeader() (h http.Header) {
 	h = make(http.Header)
-	h.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:94.0) Gecko/20100101 Firefox/94.0")
+	h.Set("User-Agent", "Wget/1.21.3")
+	h.Set("Accept", "*/*")
+	h.Set("Accept-Encoding", "identity")
 	return
 }
