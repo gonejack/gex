@@ -35,64 +35,51 @@ func (r *Request) DoWithClient(ctx context.Context, client *http.Client) (err er
 		r.Response, err = r.readInfo()
 		return
 	}
-
-	resp := &Response{
+	r.Response = &Response{
 		Request: r,
 		Output:  r.Output,
 		Start:   time.Now(),
 	}
-	r.Response = resp
-
 	defer func() {
-		resp.End = time.Now()
+		r.Response.End = time.Now()
+		r.Response.saveAsJson(r.Output + infoSuffix)
 	}()
-
-	file, stat, err := r.openPartial()
+	f, stat, err := r.openCreatePartial()
 	if err != nil {
 		return
 	}
-	defer file.Close()
-
-	req, err := r.rangeRequest(stat)
+	defer func() {
+		f.Close()
+		if err == nil {
+			err = os.Rename(f.Name(), r.Output)
+		}
+	}()
+	rq, err := r.rangeRequest(stat)
 	if err != nil {
 		return
 	}
 	if r.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
+		timeout, cancel := context.WithTimeout(ctx, r.Timeout)
 		defer cancel()
-		req = req.WithContext(ctx)
+		rq = rq.WithContext(timeout)
 	}
-	rsp, err := client.Do(req)
-	if err != nil {
-		return
+	rp, err := client.Do(rq)
+	if err == nil {
+		defer func() {
+			io.Copy(io.Discard, rp.Body)
+			rp.Body.Close()
+		}()
+		switch rp.StatusCode {
+		case http.StatusPartialContent:
+			_, _ = f.Seek(0, io.SeekEnd)
+		case http.StatusOK, http.StatusRequestedRangeNotSatisfiable:
+			_ = f.Truncate(0)
+		default:
+			return fmt.Errorf("invalid status code %d(%s)", rp.StatusCode, rp.Status)
+		}
+		r.Response.Header = rp.Header
+		r.Response.Size, err = io.Copy(f, rp.Body)
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, rsp.Body)
-		_ = rsp.Body.Close()
-	}()
-
-	switch rsp.StatusCode {
-	case http.StatusPartialContent:
-		_, _ = file.Seek(0, io.SeekEnd)
-	case http.StatusOK, http.StatusRequestedRangeNotSatisfiable:
-		_ = file.Truncate(0)
-	default:
-		err = fmt.Errorf("invalid status code %d(%s)", rsp.StatusCode, rsp.Status)
-		return
-	}
-	resp.Header = rsp.Header
-	resp.Size, err = io.Copy(file, rsp.Body)
-	if err != nil {
-		return
-	}
-	file.Close() // for Windows
-	err = os.Rename(file.Name(), r.Output)
-	if err != nil {
-		return
-	}
-	err = resp.writeInfo(r.Output + infoSuffix)
-
 	return
 }
 func (r *Request) skip() bool {
@@ -111,7 +98,7 @@ func (r *Request) readInfo() (rsp *Response, err error) {
 	}
 	return
 }
-func (r *Request) openPartial() (f *os.File, stat os.FileInfo, err error) {
+func (r *Request) openCreatePartial() (f *os.File, stat os.FileInfo, err error) {
 	f, err = os.OpenFile(r.Output+".partial", os.O_RDWR|os.O_CREATE, 0766)
 	if err == nil {
 		stat, err = f.Stat()
@@ -131,6 +118,12 @@ func (r *Request) rangeRequest(stat os.FileInfo) (req *http.Request, err error) 
 
 	return
 }
+func (r *Request) SetHeader(k, v string) {
+	r.Header.Set(k, v)
+}
+func (r *Request) SetTimeout(timeout time.Duration) {
+	r.Timeout = timeout
+}
 
 func NewRequest(dir string, requrl string) (r *Request) {
 	r = &Request{
@@ -142,5 +135,13 @@ func NewRequest(dir string, requrl string) (r *Request) {
 	if err == nil {
 		r.Output = path.Join(dir, fmt.Sprintf("%x", md5.Sum([]byte(requrl)))+path.Ext(u.Path))
 	}
+	return
+}
+
+func DefaultHeader() (h http.Header) {
+	h = make(http.Header)
+	h.Set("User-Agent", "Wget/1.21.3")
+	h.Set("Accept", "*/*")
+	h.Set("Accept-Encoding", "identity")
 	return
 }

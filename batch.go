@@ -9,28 +9,28 @@ import (
 )
 
 type batch struct {
-	mapp    map[string]*Request
-	reqs    []*Request
-	sema    *semaphore.Weighted
-	mux     sync.Mutex
-	onStart func(r *Request)
-	onStop  func(r *Request, err error)
+	keep     map[string]*Request
+	requests []*Request
+	sema     *semaphore.Weighted
+	mutex    sync.Mutex
+	onStart  func(r *Request)
+	onStop   func(r *Request, err error)
 }
 
 func (b *batch) Add(requests ...*Request) {
-	if b.mapp == nil {
-		b.mapp = make(map[string]*Request)
+	if b.keep == nil {
+		b.keep = make(map[string]*Request)
 	}
 	for _, r := range requests {
-		if b.mapp[r.Url] == nil {
-			b.mapp[r.Url] = r
-			b.reqs = append(b.reqs, r)
+		if b.keep[r.Url] == nil {
+			b.keep[r.Url] = r
+			b.requests = append(b.requests, r)
 		}
 	}
 }
 func (b *batch) Reset() {
-	b.mapp = nil
-	b.reqs = nil
+	b.keep = nil
+	b.requests = nil
 }
 func (b *batch) OnStart(fn func(r *Request)) {
 	b.onStart = fn
@@ -42,11 +42,11 @@ func (b *batch) Run(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	var grp errgroup.Group
-	for i := range b.reqs {
-		r := b.reqs[i]
+	var g errgroup.Group
+	for i := range b.requests {
+		r := b.requests[i]
 		b.sema.Acquire(ctx, 1)
-		grp.Go(func() error {
+		g.Go(func() error {
 			defer b.sema.Release(1)
 			b.sync(func() { b.onStart(r) })
 			err := r.Do(ctx)
@@ -54,11 +54,11 @@ func (b *batch) Run(ctx context.Context) {
 			return nil
 		})
 	}
-	grp.Wait()
+	g.Wait()
 }
 func (b *batch) sync(f func()) {
-	b.mux.Lock()
-	defer b.mux.Unlock()
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	f()
 }
 

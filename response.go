@@ -1,6 +1,7 @@
 package gex
 
 import (
+	"bytes"
 	"encoding/json"
 	"mime"
 	"net/http"
@@ -17,13 +18,13 @@ type Response struct {
 	Size    int64
 }
 
-func (r *Response) writeInfo(name string) error {
-	f, err := os.Create(name)
+func (r *Response) saveAsJson(name string) error {
+	buf := bytes.NewBuffer(nil)
+	enc := json.NewEncoder(buf)
+	enc.SetIndent("", "    ")
+	err := enc.Encode(r)
 	if err == nil {
-		defer f.Close()
-		enc := json.NewEncoder(f)
-		enc.SetIndent("", "    ")
-		err = enc.Encode(r)
+		err = os.WriteFile(name, buf.Bytes(), 0666)
 	}
 	return err
 }
@@ -61,13 +62,5 @@ func (r *Response) ModTime() (t time.Time) {
 			t = parsed
 		}
 	}
-	return
-}
-
-func DefaultHeader() (h http.Header) {
-	h = make(http.Header)
-	h.Set("User-Agent", "Wget/1.21.3")
-	h.Set("Accept", "*/*")
-	h.Set("Accept-Encoding", "identity")
 	return
 }
