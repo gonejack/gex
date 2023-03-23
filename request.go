@@ -42,7 +42,9 @@ func (r *Request) DoWithClient(ctx context.Context, client *http.Client) (err er
 	}
 	defer func() {
 		r.Response.End = time.Now()
-		r.Response.saveAsJson(r.Output + infoSuffix)
+		if err == nil {
+			r.Response.saveAsJson(r.Output + infoSuffix)
+		}
 	}()
 	f, stat, err := r.openCreatePartial()
 	if err != nil {
