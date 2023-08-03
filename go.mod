@@ -1,5 +1,5 @@
 module github.com/gonejack/gex
 
-go 1.18
+go 1.20
 
-require golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+require golang.org/x/sync v0.3.0
